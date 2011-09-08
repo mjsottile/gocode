@@ -24,7 +24,6 @@ const (
   itemError itemType = iota
   itemRParen
   itemLParen
-  itemWhiteSpace
   itemEOF
   itemAtom
   itemDQAtom
@@ -39,9 +38,9 @@ func (i item) String() string {
       return i.val
   }
   if len(i.val) > 20 {
-    return fmt.Sprintf("%.20q...", i.val)
+    return fmt.Sprintf("%d:%.20q...", i.typ, i.val)
   }
-  return fmt.Sprintf("%q", i.val)
+  return fmt.Sprintf("%d:%q", i.typ, i.val)
 }
 
 type stateFn func(*lexer) stateFn
@@ -93,6 +92,20 @@ func lexAtom(l *lexer) stateFn {
      }
      return lexRightParen
    }
+   if l.peek() == '"' {
+     if (l.pos > l.start) {
+       l.emit(itemAtom)
+     }
+     l.next()
+     return lexDQuote
+   }
+   if l.accept(" \r\n\t") {
+     if (l.pos > l.start) {
+       l.backup()
+       l.emit(itemAtom)
+     }
+     return lexWhitespace
+   }
    if l.next() == eof { break }
  }
  if l.pos > l.start {
@@ -100,6 +113,32 @@ func lexAtom(l *lexer) stateFn {
  }
  l.emit(itemEOF)
  return nil
+}
+
+func lexDQuote(l *lexer) stateFn {
+  if l.accept("\"") {
+    l.emit(itemDQAtom)
+    return lexAtom
+  }
+  l.next()
+  return lexDQuote
+}
+
+func (l *lexer) accept(valid string) bool {
+    if strings.IndexRune(valid, l.next()) >= 0 {
+        return true
+    }
+    l.backup()
+    return false
+}
+
+func lexWhitespace(l *lexer) stateFn {
+  whitespace := " \r\n\t"
+  if l.accept(whitespace) {
+    l.ignore()
+    return lexWhitespace
+  }
+  return lexAtom
 }
 
 func lexLeftParen(l *lexer) stateFn {
@@ -112,6 +151,20 @@ func lexRightParen(l *lexer) stateFn {
   l.pos += len(rightParen)
   l.emit(itemRParen)
   return lexAtom
+}
+
+func (l *lexer) ignore() {
+  l.start = l.pos
+}
+
+func (l *lexer) backup() {
+  l.pos -= l.width
+}
+
+func (l *lexer ) peek() int {
+  rune := l.next()
+  l.backup()
+  return rune
 }
 
 func (l *lexer) next() (rune int) {
@@ -140,7 +193,7 @@ func printall(ch chan item) {
 
 // main will be for testing for now
 func main() {
-  l, items := lex("Hi","(test (test2 test3))")
+  l, items := lex("Hi","(test (test2 \"i am long\" test3))")
   fmt.Println(l.name)
   printall(items)
 }
