@@ -12,13 +12,24 @@ import "strings"
 
 const eof = -1
 
-// s-expression item
+// s-expression lexer item
 type item struct {
   typ itemType
   val string
 }
 
-type itemType int
+// s-expression structure item
+type sexpr struct {
+  aty atomType
+  sty sexprType
+  next *sexpr
+  list *sexpr
+  val  string
+}
+
+type itemType  int
+type atomType  int
+type sexprType int
 
 const (
   itemError itemType = iota
@@ -27,7 +38,17 @@ const (
   itemEOF
   itemAtom
   itemDQAtom
-  itemSQAtom
+)
+
+const (
+  sexprAtom sexprType = iota
+  sexprList
+)
+
+const (
+  atomBasic atomType = iota
+  atomDQuote
+  atomInvalid
 )
 
 func (i item) String() string {
@@ -43,7 +64,44 @@ func (i item) String() string {
   return fmt.Sprintf("%d:%q", i.typ, i.val)
 }
 
+func (s sexpr) String() string {
+  switch s.sty {
+    case sexprList:
+      return fmt.Sprintf("LIST:\n  next=%s\n  list=%s\n",s.next,s.list)
+    case sexprAtom:
+      return fmt.Sprintf("%s -> %s",s.val,s.next)
+  }
+  return ""
+}
+
 type stateFn func(*lexer) stateFn
+
+func parse (ch chan item) (* sexpr) {
+  i := <-ch
+  switch i.typ {
+    case itemLParen:
+      slist := parse (ch)
+      snext := parse (ch)
+      s := &sexpr { aty  : atomInvalid,
+                    sty  : sexprList,
+                    val  : "",
+                    list : slist,
+                    next : snext }
+      return s
+    case itemRParen:
+      return nil
+    case itemAtom:
+      snext := parse (ch)
+      s := &sexpr { aty  : atomBasic,
+                    sty  : sexprAtom, 
+                    val  : i.val, 
+                    list : nil,
+                    next : snext }
+      return s
+    case itemDQAtom:
+  }
+  return nil
+}
 
 type lexer struct {
   name  string
@@ -66,6 +124,7 @@ func lex(name, input string) (*lexer, chan item) {
   return l, l.items
 }
 
+// 
 func (l *lexer) run() {
   for state := lexAtom; state != nil; {
     state = state(l)
@@ -80,13 +139,13 @@ func (l *lexer) emit(t itemType) {
 
 func lexAtom(l *lexer) stateFn {
  for {
-   if strings.HasPrefix(l.input[l.pos:], leftParen) {
+   if l.peek() == '(' {
      if (l.pos > l.start) {
        l.emit(itemAtom)
      }
      return lexLeftParen
    }
-   if strings.HasPrefix(l.input[l.pos:], rightParen) {
+   if l.peek() == ')' {
      if (l.pos > l.start) {
        l.emit(itemAtom)
      }
@@ -99,9 +158,9 @@ func lexAtom(l *lexer) stateFn {
      l.next()
      return lexDQuote
    }
-   if l.accept(" \r\n\t") {
+   if l.peek() == ' '  || l.peek() == '\t' || 
+      l.peek() == '\r' || l.peek() == '\n' {
      if (l.pos > l.start) {
-       l.backup()
        l.emit(itemAtom)
      }
      return lexWhitespace
@@ -193,7 +252,9 @@ func printall(ch chan item) {
 
 // main will be for testing for now
 func main() {
-  l, items := lex("Hi","(test (test2 \"i am long\" test3))")
+  l, items := lex("S-Expression Lexer","(test (test2 \"i am long\" test3) blah)")
+  s := parse(items)
   fmt.Println(l.name)
-  printall(items)
+//  printall(items)
+  fmt.Println(s)
 }
