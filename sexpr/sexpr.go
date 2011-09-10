@@ -417,7 +417,7 @@ func main() {
     // make a test string
     testexpr := "(test (test2 \"i am long\" test3) blah a b c d e f)"
 
-    // fire off the lexer goroutine and get the chanel of lex items that
+    // fire off the lexer goroutine and get the channel of lex items that
     // it is emitting into
     _, items := lex("S-Expression Lexer",testexpr)
 
@@ -427,7 +427,7 @@ func main() {
 
     // given the struct, now we can...
 
-    // putit in a dot file to look at with graphviz
+    // put it in a dot file to look at with graphviz
     sexprToDotFile(s,"test.dot");
 
     // or, make a new channel that we can unparse it into
