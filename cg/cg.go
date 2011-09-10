@@ -5,6 +5,9 @@ import "container/vector"
 
 //
 // category game model in go
+// translating from Haskell to see how this feels in Go.
+//
+// matt@galois.com // sept. 2011
 //
 
 type nodeType int
