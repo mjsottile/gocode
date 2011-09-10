@@ -91,26 +91,37 @@ const eof = -1
 
 // given an s-expression and a channel, emit a sequence of characters
 // representing the unparsed s-expression
-func sexprUnparse (s *sexpr, ch chan byte) {
+func unparse (s *sexpr, ch chan byte) {
+    _unparse(s,ch)
+    close(ch)
+}
+
+// helper for unparse - this one recurses, so we don't necessarily know
+// where we are in the overall structure - so it can't close the channel.
+// the unparse function that calls this DOES know, so that is the one that
+// gets called.
+func _unparse (s *sexpr, ch chan byte) {
     if (s == nil) {
         return
     }
-
-    for s != nil {
-        switch s.sty {
+    cur := s
+    for cur != nil {
+        switch cur.sty {
         case sexprList:
             ch <- '('
-            sexprUnparse(s.list, ch)
+            _unparse(cur.list, ch)
             ch <- ')'
         case sexprAtom:
-            for i := range s.val {
-                ch <- s.val[i]
+            for i := range cur.val {
+                ch <- cur.val[i]
             }
+        default:
+            panic("Impossible happened.")
         }
-        if (s.next != nil) {
+        if (cur.next != nil) {
             ch <- ' '
-            sexprUnparse(s.next, ch)
         }
+        cur = cur.next
     }
 }
 
@@ -133,7 +144,8 @@ func _sexprToDotFile(s *sexpr, file *os.File, id int) int {
     fmt.Fprintf(file,"  sx%d [shape=record,label=\"", id)
     switch s.sty {
     case sexprAtom:
-        fmt.Fprintf(file,"<type> ATOM value=%s ",s.val)
+        safeVal := fmt.Sprintf("%q",s.val)
+        fmt.Fprintf(file,"<type> ATOM value=%s ", safeVal[1:len(safeVal)-1])
         break
     case sexprList:
         fmt.Fprintf(file,"<type> LIST")
@@ -198,7 +210,11 @@ func (s sexpr) String() string {
 
 // given a channel of lexer items, parse them into a s-expression structure
 func parse (ch chan item) (* sexpr) {
-    i := <-ch
+    i, ok := <-ch
+
+    if !ok {
+        panic("channel feeding parse closed prematurely - malformed sexpr.")
+    }
 
     switch i.typ {
     case itemLParen:
@@ -261,15 +277,17 @@ func (l *lexer) emit(t itemType) {
     l.start = l.pos
 }
 
-func emitHelper(l *lexer, t itemType, nextState stateFn) stateFn {
-    if (l.pos > l.start) {
-        l.emit(t)
-    }
-    return nextState
-}
-
 // state for lexing an atom
 func lexAtom(l *lexer) stateFn {
+    // helper function that we use over and over - avoid replicating
+    // code in the body of lexAtom
+    emitHelper := func (l *lexer, t itemType, nextState stateFn) stateFn {
+        if (l.pos > l.start) {
+            l.emit(t)
+        }
+        return nextState
+    }
+
     for {
         if l.peek() == '(' {
             return emitHelper(l, itemAtom, lexLeftParen)
@@ -381,14 +399,44 @@ func printall(ch chan item) {
     }
 }
 
-// main will be for testing for now
+func printTheChars(ch chan byte) {
+    for { 
+        i, ok := <- ch
+        if !ok {
+            break
+        }
+        fmt.Printf("%c",i) 
+    }
+    fmt.Printf("\n")
+}
+
+//
+// main for testing
+//
 func main() {
-    testexpr := "(test (test2 \"i am long\" test3) blah)"
-    l, items := lex("S-Expression Lexer",testexpr)
+    // make a test string
+    testexpr := "(test (test2 \"i am long\" test3) blah a b c d e f)"
+
+    // fire off the lexer goroutine and get the chanel of lex items that
+    // it is emitting into
+    _, items := lex("S-Expression Lexer",testexpr)
+
+    // connect the parser to consume the channel of lex items.  this
+    // routine yields the parsed s-expression structure
     s := parse(items)
-    fmt.Println(l.name)
-    //  printall(items)
-    fmt.Println(s)
-    fmt.Println("EXPR=",testexpr)
+
+    // given the struct, now we can...
+
+    // putit in a dot file to look at with graphviz
     sexprToDotFile(s,"test.dot");
+
+    // or, make a new channel that we can unparse it into
+    ch := make(chan byte)
+
+    // fire off the goroutine to do the unparsing, which will push
+    // the unparsed characters into the channel
+    go unparse(s, ch)
+
+    // hook up a consumer to read from the channel until it closes
+    printTheChars(ch)
 }
